@@ -2,7 +2,8 @@ name: Robô de Prints Automático
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    # Roda diariamente às 11:00 UTC (08:00 no horário de Brasília)
+    - cron: '0 11 * * *'
   workflow_dispatch:
 
 jobs:
