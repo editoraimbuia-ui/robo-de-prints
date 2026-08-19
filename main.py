@@ -4,7 +4,7 @@ import base64
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-API_URL = "https://script.google.com/macros/s/AKfycbxBXeDIie_Ler7HRrfQKMp1S-nr8NJNw-P8L8aCQr7Axtomizye0xpvSKu9EsMyrp2mkw/exec"
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbziOUR8IbOgz2viSG8u7FfWMRwc_X4YCl.../exec"
 
 def converter_data(data_str):
     try:
