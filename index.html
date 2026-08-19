@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gerenciador de Prints - Painel de Controle</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    body {
+      background-color: #0f172a;
+      color: #f8fafc;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .card {
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 500px;
+      padding: 30px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #38bdf8;
+    }
+    p.subtitle {
+      font-size: 0.875rem;
+      color: #94a3b8;
+      margin-bottom: 24px;
+    }
+    .form-group {
+      margin-bottom: 18px;
+    }
+    label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: #cbd5e1;
+    }
+    input[type="text"],
+    input[type="url"],
+    input[type="date"] {
+      width: 100%;
+      padding: 10px 14px;
+      background-color: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus {
+      border-color: #38bdf8;
+    }
+    .checkbox-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 6px;
+    }
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background-color: #0f172a;
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .checkbox-item input {
+      accent-color: #38bdf8;
+      cursor: pointer;
+    }
+    .row {
+      display: flex;
+      gap: 12px;
+    }
+    .row .form-group {
+      flex: 1;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      background-color: #0284c7;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      margin-top: 10px;
+    }
+    button:hover {
+      background-color: #0369a1;
+    }
+    button:disabled {
+      background-color: #475569;
+      cursor: not-allowed;
+    }
+    #statusMsg {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      text-align: center;
+      display: none;
+    }
+    .success {
+      background-color: #064e3b;
+      color: #34d399;
+      border: 1px solid #047857;
+    }
+    .error {
+      background-color: #7f1d1d;
+      color: #f87171;
+      border: 1px solid #b91c1c;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>🚀 Novo Cadastro de Campanha</h1>
+    <p class="subtitle">Cadastre a campanha para o robô capturar os prints automaticamente.</p>
+
+    <form id="campanhaForm">
+      <div class="form-group">
+        <label for="cliente">Nome do Cliente / Campanha</label>
+        <input type="text" id="cliente" placeholder="Ex: Prefeitura de Corbélia" required>
+      </div>
+
+      <div class="form-group">
+        <label for="url">URL do Portal/Site</label>
+        <input type="url" id="url" placeholder="https://gazetadoparana.com.br" required>
+      </div>
+
+      <div class="form-group">
+        <label>Posições do Banner (Selecione uma ou mais)</label>
+        <div class="checkbox-group">
+          <label class="checkbox-item">
+            <input type="checkbox" name="posicao" value="banner topo"> Banner Topo
+          </label>
+          <label class="checkbox-item">
+            <input type="checkbox" name="posicao" value="banner meio"> Banner Meio
+          </label>
+          <label class="checkbox-item">
+            <input type="checkbox" name="posicao" value="banner lateral"> Banner Lateral
+          </label>
+          <label class="checkbox-item">
+            <input type="checkbox" name="posicao" value="banner rodape"> Banner Rodapé
+          </label>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label for="data_inicio">Data de Início</label>
+          <input type="date" id="data_inicio" required>
+        </div>
+        <div class="form-group">
+          <label for="data_fim">Data de Término</label>
+          <input type="date" id="data_fim" required>
+        </div>
+      </div>
+
+      <button type="submit" id="btnSalvar">Cadastrar Campanha</button>
+    </form>
+
+    <div id="statusMsg"></div>
+  </div>
+
+  <script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbxBXeDIie_Ler7HRrfQKMp1S-nr8NJNw-P8L8aCQr7Axtomizye0xpvSKu9EsMyrp2mkw/exec";
+
+    document.getElementById("campanhaForm").addEventListener("submit", async function(e) {
+      e.preventDefault();
+      
+      const btn = document.getElementById("btnSalvar");
+      const msg = document.getElementById("statusMsg");
+      
+      const cliente = document.getElementById("cliente").value.trim();
+      const url = document.getElementById("url").value.trim();
+      const data_inicio_raw = document.getElementById("data_inicio").value;
+      const data_fim_raw = document.getElementById("data_fim").value;
+      
+      const posicoesNode = document.querySelectorAll('input[name="posicao"]:checked');
+      const posicoes = Array.from(posicoesNode).map(cb => cb.value);
+
+      if (posicoes.length === 0) {
+        msg.className = "error";
+        msg.innerText = "Por favor, selecione pelo menos uma posição de banner.";
+        msg.style.display = "block";
+        return;
+      }
+
+      // Formata data do HTML (AAAA-MM-DD) para o padrão (DD/MM/AAAA)
+      const formatarData = (dStr) => {
+        const [y, m, d] = dStr.split('-');
+        return `${d}/${m}/${y}`;
+      };
+
+      const payload = {
+        cliente: cliente,
+        url: url,
+        posicoes: posicoes,
+        data_inicio: formatarData(data_inicio_raw),
+        data_fim: formatarData(data_fim_raw)
+      };
+
+      btn.disabled = true;
+      btn.innerText = "Salvando na planilha...";
+      msg.style.display = "none";
+
+      try {
+        await fetch(API_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        msg.className = "success";
+        msg.innerText = "✅ Campanha cadastrada com sucesso na planilha!";
+        msg.style.display = "block";
+        
+        document.getElementById("campanhaForm").reset();
+      } catch (err) {
+        msg.className = "error";
+        msg.innerText = "❌ Erro ao cadastrar. Tente novamente.";
+        msg.style.display = "block";
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "Cadastrar Campanha";
+      }
+    });
+  </script>
+</body>
+</html>
