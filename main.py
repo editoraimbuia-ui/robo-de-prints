@@ -68,7 +68,7 @@ def executar():
             print(f"Capturando print de: {cliente} | {url}")
 
             try:
-                page.goto(url, timeout=60000, wait_until="load")
+              page.goto(url, timeout=15000, wait_until="load")
                 page.wait_for_timeout(3000)
 
                 nome_arquivo = f"{cliente}_{posicao}_{hoje}.png".replace(" ", "_").replace("/", "-")
