@@ -4,7 +4,7 @@ import base64
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-https://script.google.com/macros/s/AKfycbziOURSlbOgz2vISG8u7FfWMRwe_X4YCICY_e3YQjGF3D_t7AJ7zsWfxSeANOr3NL0N4w/exec
+WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzioUR51hOg2vI5GRu7PNNRae_x4YTI1Y_eSYUj0P3D_7A3J7xSkfXsAnO-9NLQN4w/exec"
 
 def converter_data(data_str):
     try:
@@ -21,113 +21,68 @@ def enviar_para_google_drive(caminho_arquivo, nome_arquivo):
     try:
         with open(caminho_arquivo, "rb") as f:
             encoded_string = base64.b64encode(f.read()).decode("utf-8")
-        
+
         payload = {
             "fileName": nome_arquivo,
             "mimeType": "image/png",
             "base64": encoded_string
         }
-        
-        res = requests.post(API_URL, json=payload)
+
+        res = requests.post(WEBAPP_URL, json=payload)
         print(f"Envio ao Drive ({nome_arquivo}): {res.text}")
     except Exception as e:
         print(f"Erro ao enviar {nome_arquivo} para o Drive: {e}")
 
-def executar_prints():
-    os.makedirs("prints", exist_ok=True)
+def executar():
     hoje = datetime.now().date()
-    
-    try:
-        response = requests.get(API_URL)
-        campanhas = response.json()
-    except Exception as e:
-        print(f"Erro ao buscar planilha: {e}")
-        campanhas = []
+    print(f"--- Início do Processamento: {hoje} ---")
 
-    falhas = []
-    capturas_realizadas = 0
+    try:
+        res = requests.get(WEBAPP_URL)
+        campanhas = res.json()
+    except Exception as e:
+        print(f"Erro ao buscar dados do Apps Script: {e}")
+        return
+
+    os.makedirs("prints", exist_ok=True)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1920, "height": 1080})
-        page = context.new_page()
-        
-        for item in campanhas:
-            status = str(item.get("status", "")).strip().upper()
-            url = str(item.get("url", "")).strip()
-            cliente = str(item.get("cliente", "Cliente")).strip()
-            posicao = str(item.get("posicao", "")).strip()
-            
-            d_inicio = converter_data(item.get("data_inicio"))
-            d_fim = converter_data(item.get("data_fim"))
-            
-            dentro_do_prazo = True
-            if d_inicio and hoje < d_inicio:
-                dentro_do_prazo = False
-            if d_fim and hoje > d_fim:
-                dentro_do_prazo = False
+        page = browser.new_page(viewport={"width": 1920, "height": 1080})
 
-            if status == "ATIVO" and url and dentro_do_prazo:
-                if not url.startswith("http://") and not url.startswith("https://"):
-                    url = "https://" + url
-                    
-                sucesso = False
-                
-                for tentativa in range(5):
-                    try:
-                        print(f"Tentativa {tentativa+1} para {cliente} ({posicao}) em {url}")
-                        page.goto(url, wait_until="networkidle", timeout=30000)
-                        page.wait_for_timeout(3000)
-                        
-                        agora = datetime.now()
-                        hora_str = agora.strftime("%H:%M")
-                        data_str = agora.strftime("%d/%m/%Y")
-                        data_arquivo = agora.strftime("%Y-%m-%d")
-                        
-                        page.evaluate(f"""
-                            () => {{
-                                const topNav = document.createElement('div');
-                                topNav.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#202124;color:#e8eaed;padding:8px 15px;font-size:13px;font-family:Arial,sans-serif;z-index:999999;box-sizing:border-box;display:flex;align-items:center;border-bottom:1px solid #3c4043;';
-                                topNav.innerHTML = '<span style="color:#9aa0a6;margin-right:10px;">🔒</span><div style="background:#303134;padding:4px 12px;border-radius:16px;width:100%;color:#fff;font-size:12px;">{url}</div>';
-                                document.body.appendChild(topNav);
+        for c in campanhas:
+            cliente = c.get("cliente")
+            url = c.get("url")
+            posicao = c.get("posicao")
+            status = c.get("status")
+            d_inicio = converter_data(c.get("data_inicio"))
+            d_fim = converter_data(c.get("data_fim"))
 
-                                const taskbar = document.createElement('div');
-                                taskbar.style.cssText = 'position:fixed;bottom:0;left:0;width:100%;background:#101010;color:#ffffff;padding:4px 15px;font-size:11px;font-family:Arial,sans-serif;z-index:999999;box-sizing:border-box;display:flex;justify-content:space-between;align-items:center;height:40px;border-top:1px solid #222;';
-                                taskbar.innerHTML = '<div><span style="margin-right:15px;font-weight:bold;">⊞ Iniciar</span><input type="text" value="Digite aqui para pesquisar" style="background:#222;border:none;color:#aaa;padding:3px 10px;border-radius:3px;font-size:11px;" readonly></div><div style="text-align:right;line-height:1.2;"><div>{hora_str}</div><div>{data_str}</div></div>';
-                                document.body.appendChild(taskbar);
-                                
-                                document.body.style.paddingTop = '38px';
-                                document.body.style.paddingBottom = '40px';
-                            }}
-                        """)
-                        
-                        page.wait_for_timeout(1000)
-                        
-                        cliente_limpo = "".join(c for c in cliente if c.isalnum() or c in (' ', '_', '-')).strip()
-                        posicao_limpa = "".join(c for c in posicao if c.isalnum() or c in (' ', '_', '-')).strip()
-                        nome_imagem = f"{cliente_limpo}_{posicao_limpa}_{data_arquivo}.png"
-                        caminho_arquivo = f"prints/{nome_imagem}"
-                        
-                        page.screenshot(path=caminho_arquivo, full_page=False)
-                        sucesso = True
-                        capturas_realizadas += 1
-                        print(f"Print capturado com sucesso: {caminho_arquivo}")
-                        
-                        # Envia automaticamente para a pasta do Google Drive
-                        enviar_para_google_drive(caminho_arquivo, nome_imagem)
-                        break
-                    except Exception as e:
-                        print(f"Tentativa {tentativa+1} falhou: {e}")
-                
-                if not sucesso:
-                    falhas.append(f"Cliente: {cliente} ({posicao}) | URL: {url}")
+            if status != "Ativo":
+                continue
+
+            if d_inicio and d_fim:
+                if not (d_inicio <= hoje <= d_fim):
+                    continue
+
+            print(f"Capturando print de: {cliente} | {url}")
+
+            try:
+                page.goto(url, timeout=60000, wait_until="load")
+                page.wait_for_timeout(3000)
+
+                nome_arquivo = f"{cliente}_{posicao}_{hoje}.png".replace(" ", "_").replace("/", "-")
+                caminho_local = os.path.join("prints", nome_arquivo)
+
+                page.screenshot(path=caminho_local, full_page=True)
+                print(f"Print gerado localmente: {nome_arquivo}")
+
+                enviar_para_google_drive(caminho_local, nome_arquivo)
+
+            except Exception as e:
+                print(f"Erro ao capturar print de {cliente}: {e}")
 
         browser.close()
 
-    if falhas:
-        print("::: ATENÇÃO: FALHA NOS PRINTS ABAIXO :::")
-        for f in falhas:
-            print(f)
-
 if __name__ == "__main__":
-    executar_prints()
+    executar()
