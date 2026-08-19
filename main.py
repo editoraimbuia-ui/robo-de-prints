@@ -1,5 +1,6 @@
 import os
 import requests
+import base64
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
@@ -15,6 +16,22 @@ def converter_data(data_str):
         except:
             return None
     return None
+
+def enviar_para_google_drive(caminho_arquivo, nome_arquivo):
+    try:
+        with open(caminho_arquivo, "rb") as f:
+            encoded_string = base64.b64encode(f.read()).decode("utf-8")
+        
+        payload = {
+            "fileName": nome_arquivo,
+            "mimeType": "image/png",
+            "base64": encoded_string
+        }
+        
+        res = requests.post(API_URL, json=payload)
+        print(f"Envio ao Drive ({nome_arquivo}): {res.text}")
+    except Exception as e:
+        print(f"Erro ao enviar {nome_arquivo} para o Drive: {e}")
 
 def executar_prints():
     os.makedirs("prints", exist_ok=True)
@@ -44,7 +61,6 @@ def executar_prints():
             d_inicio = converter_data(item.get("data_inicio"))
             d_fim = converter_data(item.get("data_fim"))
             
-            # Validação se hoje está dentro da janela de exibição
             dentro_do_prazo = True
             if d_inicio and hoje < d_inicio:
                 dentro_do_prazo = False
@@ -57,7 +73,6 @@ def executar_prints():
                     
                 sucesso = False
                 
-                # Tenta recarregar a página até 5 vezes para encontrar o banner rotativo
                 for tentativa in range(5):
                     try:
                         print(f"Tentativa {tentativa+1} para {cliente} ({posicao}) em {url}")
@@ -69,7 +84,6 @@ def executar_prints():
                         data_str = agora.strftime("%d/%m/%Y")
                         data_arquivo = agora.strftime("%Y-%m-%d")
                         
-                        # Injeta a moldura estilo Desktop (Navegador + Barra do Windows)
                         page.evaluate(f"""
                             () => {{
                                 const topNav = document.createElement('div');
@@ -91,12 +105,16 @@ def executar_prints():
                         
                         cliente_limpo = "".join(c for c in cliente if c.isalnum() or c in (' ', '_', '-')).strip()
                         posicao_limpa = "".join(c for c in posicao if c.isalnum() or c in (' ', '_', '-')).strip()
-                        nome_arquivo = f"prints/{cliente_limpo}_{posicao_limpa}_{data_arquivo}.png"
+                        nome_imagem = f"{cliente_limpo}_{posicao_limpa}_{data_arquivo}.png"
+                        caminho_arquivo = f"prints/{nome_imagem}"
                         
-                        page.screenshot(path=nome_arquivo, full_page=False)
+                        page.screenshot(path=caminho_arquivo, full_page=False)
                         sucesso = True
                         capturas_realizadas += 1
-                        print(f"Print capturado com sucesso: {nome_arquivo}")
+                        print(f"Print capturado com sucesso: {caminho_arquivo}")
+                        
+                        # Envia automaticamente para a pasta do Google Drive
+                        enviar_para_google_drive(caminho_arquivo, nome_imagem)
                         break
                     except Exception as e:
                         print(f"Tentativa {tentativa+1} falhou: {e}")
@@ -105,10 +123,6 @@ def executar_prints():
                     falhas.append(f"Cliente: {cliente} ({posicao}) | URL: {url}")
 
         browser.close()
-
-    if capturas_realizadas == 0 and not falhas:
-        with open("prints/aviso.txt", "w") as f:
-            f.write("Nenhuma campanha ATIVA e DENTRO DO PRAZO foi encontrada para hoje.")
 
     if falhas:
         print("::: ATENÇÃO: FALHA NOS PRINTS ABAIXO :::")
