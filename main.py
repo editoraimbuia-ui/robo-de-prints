@@ -1,9 +1,3 @@
-"""
-Monitor de Prints - Gazeta do Paraná
-Roda no GitHub Actions (Linux + Playwright)
-Busca banner pelo atributo alt, fotografa o elemento, envia por email.
-"""
-
 import json
 import os
 import smtplib
@@ -44,29 +38,29 @@ def campanha_ativa_hoje(c):
     return inicio <= hoje <= fim
 
 
-def adicionar_carimbo(img_bytes, campanha, posicao):
+def adicionar_carimbo(img_bytes, campanha, posicao, url):
     from io import BytesIO
     img = Image.open(BytesIO(img_bytes)).convert("RGB")
-    rodape_h = 36
-    nova = Image.new("RGB", (img.width, img.height + rodape_h), (30, 30, 30))
+    rodape_h = 44
+    nova = Image.new("RGB", (img.width, img.height + rodape_h), (20, 20, 20))
     nova.paste(img, (0, 0))
     draw = ImageDraw.Draw(nova)
     try:
-        fonte = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+        fonte = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15)
     except Exception:
         fonte = ImageFont.load_default()
     agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    texto = f"{URL_SITE}  |  {agora}  |  {campanha}  |  {posicao}"
-    draw.text((8, img.height + 8), texto, fill=(220, 220, 220), font=fonte)
+    linha1 = f"URL: {url}"
+    linha2 = f"Capturado em: {agora}  |  Campanha: {campanha}  |  Posição: {posicao}"
+    draw.text((8, img.height + 4), linha1, fill=(180, 180, 180), font=fonte)
+    draw.text((8, img.height + 24), linha2, fill=(220, 220, 220), font=fonte)
     buf = BytesIO()
     nova.save(buf, format="PNG")
     return buf.getvalue()
 
 
-def tirar_print_banner(page, alt_texto, nome_arquivo):
-    if not alt_texto or alt_texto.strip() == "":
-        print(f"  [AVISO] alt vazio, pulando {nome_arquivo}")
-        return None
+def rolar_ate_banner(page, alt_texto):
+    """Rola a página até o banner ficar visível e centralizado na tela."""
     seletores = [
         f'img[alt="{alt_texto}"]',
         f'img[alt*="{alt_texto}"]',
@@ -78,26 +72,36 @@ def tirar_print_banner(page, alt_texto, nome_arquivo):
             if elem.count() == 0:
                 continue
             elem.scroll_into_view_if_needed(timeout=5000)
+            page.wait_for_timeout(1000)
+            # Centraliza o banner na viewport
+            page.evaluate("""
+                (selector) => {
+                    const el = document.querySelector(selector);
+                    if (el) {
+                        const rect = el.getBoundingClientRect();
+                        const scrollY = window.scrollY + rect.top - (window.innerHeight / 2) + (rect.height / 2);
+                        window.scrollTo({top: scrollY, behavior: 'instant'});
+                    }
+                }
+            """, sel)
             page.wait_for_timeout(800)
-            dados = elem.screenshot()
-            if dados and len(dados) > 1000:
-                print(f"  [OK] Banner encontrado: {sel}")
-                return dados
-            pai = page.locator(sel).first.locator("xpath=..")
-            dados = pai.screenshot()
-            if dados and len(dados) > 1000:
-                print(f"  [OK] Banner (pai) encontrado: {sel}")
-                return dados
+            print(f"  [OK] Banner localizado: {sel}")
+            return True
         except Exception as e:
             print(f"  [tentativa] {sel}: {e}")
             continue
-    print(f"  [AVISO] Banner nao encontrado. Print completo da pagina.")
+    print(f"  [AVISO] Banner '{alt_texto}' não encontrado. Print do topo da página.")
+    return False
+
+
+def tirar_print_tela_completa(page):
+    """Tira print da viewport inteira (como aparece na tela)."""
     return page.screenshot(full_page=False)
 
 
 def enviar_email(assunto, corpo, anexos):
     if not GMAIL_SENHA:
-        print("[ERRO] GMAIL_SENHA nao definida nos Secrets do GitHub.")
+        print("[ERRO] GMAIL_SENHA não definida nos Secrets do GitHub.")
         return False
     msg = MIMEMultipart()
     msg["From"]    = EMAIL_REMETENTE
@@ -128,48 +132,62 @@ def main():
     if not ativas:
         print("Nenhuma campanha para processar. Encerrando.")
         return
+
     with sync_playwright() as pw:
         browser = pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu","--window-size=1920,1080"],
+            args=["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu","--window-size=1366,768"],
         )
         context = browser.new_context(
-            viewport={"width": 1920, "height": 1080},
+            viewport={"width": 1366, "height": 768},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
+
         for c in ativas:
             nome = c.get("nome", f"campanha_{c.get('id',0)}")
             print(f"\n-- Processando: {nome} --")
+
             page = context.new_page()
             try:
                 page.goto(URL_SITE, wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(3000)
             except Exception as e:
-                print(f"  [ERRO] Nao foi possivel abrir o site: {e}")
+                print(f"  [ERRO] Não foi possível abrir o site: {e}")
                 page.close()
                 continue
+
             anexos = []
             data_str = hoje.strftime("%Y%m%d")
+            url_atual = page.url
+
+            # Banner topo
             if c.get("topo", False) and c.get("banner_topo", "").strip():
                 alt = c["banner_topo"]
                 fname = f"topo_{nome}_{data_str}.png"
                 print(f"  Topo -> alt: '{alt}'")
-                dados = tirar_print_banner(page, alt, fname)
+                rolar_ate_banner(page, alt)
+                dados = tirar_print_tela_completa(page)
                 if dados:
-                    dados = adicionar_carimbo(dados, nome, "Topo")
+                    dados = adicionar_carimbo(dados, nome, "Topo", url_atual)
                     anexos.append((fname, dados))
+
+            # Banner meio
             if c.get("meio", False) and c.get("banner_meio", "").strip():
                 alt = c["banner_meio"]
                 fname = f"meio_{nome}_{data_str}.png"
                 print(f"  Meio -> alt: '{alt}'")
-                dados = tirar_print_banner(page, alt, fname)
+                rolar_ate_banner(page, alt)
+                dados = tirar_print_tela_completa(page)
                 if dados:
-                    dados = adicionar_carimbo(dados, nome, "Meio")
+                    dados = adicionar_carimbo(dados, nome, "Meio", url_atual)
                     anexos.append((fname, dados))
+
             page.close()
+
             if not anexos:
-                print(f"  [AVISO] Nenhum print gerado para '{nome}' - verifique o campo alt.")
+                print(f"  [AVISO] Nenhum print gerado para '{nome}'.")
                 continue
+
             assunto = f"Comprovante de veiculacao - {nome} - {hoje.strftime('%d/%m/%Y')}"
             corpo = (
                 f"Ola,\n\nSeguem os prints de comprovacao de veiculacao da campanha '{nome}' "
@@ -178,6 +196,7 @@ def main():
                 f"Atenciosamente,\nEditora Imbuia"
             )
             enviar_email(assunto, corpo, anexos)
+
         browser.close()
     print("\n[FIM] Processamento concluido.")
 
