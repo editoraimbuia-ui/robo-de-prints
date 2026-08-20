@@ -6,7 +6,7 @@ from email.message import EmailMessage
 from playwright.sync_api import sync_playwright
 
 # --- CONFIGURAÇÕES DE E-MAIL ---
-EMAIL_REMETENTE = "gazetadoparana01@hotmail.com"
+EMAIL_REMETENTE = "editoraimbuia@gmail.com"
 EMAIL_DESTINATARIO = "gazetadoparana01@hotmail.com"
 
 # Senha de app gerada na conta Google
