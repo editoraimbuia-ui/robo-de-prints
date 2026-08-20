@@ -106,6 +106,7 @@ def executar():
             d_inicio = converter_data(obter_valor_chaves(c, "data_inicio", "data inicio", "Data Início"))
             d_fim = converter_data(obter_valor_chaves(c, "data_fim", "data fim", "Data Fim"))
 
+            # Filtra apenas campanhas ativas dentro da data de hoje
             if str(status).strip().lower() != "ativo":
                 continue
 
@@ -115,25 +116,28 @@ def executar():
             if not url:
                 continue
 
-            print(f"Processando: {cliente} (Espaço {posicao})")
+            print(f"Capturando: {cliente} (Espaço {posicao})")
 
             try:
                 page.goto(url, timeout=60000, wait_until="domcontentloaded")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(2500)
 
-                # Scroll exato para cada espaço
+                # Mapeamento exato de rolagem da tela
                 if "1" in posicao or "topo" in posicao:
                     page.evaluate("window.scrollTo(0, 0);")
                 elif "2" in posicao or "principal" in posicao:
                     page.evaluate("window.scrollTo(0, 300);")
                 elif "3" in posicao or "meio" in posicao:
                     page.evaluate("window.scrollTo(0, 800);")
-                elif "4" in posicao or "lateral" in posicao:
-                    page.evaluate("window.scrollTo(0, 500);")
+                elif "4" in posicao or "noticias" in posicao or "últimas" in posicao:
+                    # Rola exatamente até a seção de Últimas Notícias (Espaço 4)
+                    page.evaluate("window.scrollTo(0, 1300);")
                 elif "5" in posicao or "rodape" in posicao:
                     page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                elif "6" in posicao or "7" in posicao or "materia" in posicao:
+                elif "6" in posicao or "materia a" in posicao:
                     page.evaluate("window.scrollTo(0, 1100);")
+                elif "7" in posicao or "materia b" in posicao:
+                    page.evaluate("window.scrollTo(0, 1600);")
 
                 page.wait_for_timeout(2000)
 
@@ -142,6 +146,7 @@ def executar():
 
                 page.screenshot(path=caminho_local, full_page=False)
 
+                # Adiciona o carimbo visual com a URL e Data/Hora
                 data_hora_agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
                 adicionar_carimbo_url_data(caminho_local, url, data_hora_agora, cliente, posicao)
 
