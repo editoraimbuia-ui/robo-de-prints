@@ -4,6 +4,7 @@ import smtplib
 from datetime import datetime
 from email.message import EmailMessage
 from playwright.sync_api import sync_playwright
+from PIL import Image, ImageDraw, ImageFont
 
 # --- CONFIGURAÇÕES DE E-MAIL ---
 EMAIL_REMETENTE = "editoraimbuia@gmail.com"
@@ -31,8 +32,27 @@ def obter_valor_chaves(dicionario, *chaves):
             return dicionario_normalizado[chave_normalizada]
     return None
 
+def adicionar_carimbo_url_data(caminho_imagem, url, data_hora_str, cliente, espaco):
+    """ Adiciona um carimbo profissional no topo do print com URL, Data e Hora """
+    img = Image.open(caminho_imagem)
+    largura, altura = img.size
+    
+    altura_carimbo = 50
+    nova_img = Image.new("RGB", (largura, altura + altura_carimbo), (240, 242, 245))
+    nova_img.paste(img, (0, altura_carimbo))
+    
+    draw = ImageDraw.Draw(nova_img)
+    texto = f"  URL: {url}   |   DATA/HORA: {data_hora_str}   |   CLIENTE: {cliente} (Espaço {espaco})"
+    
+    try:
+        font = ImageFont.truetype("arial.ttf", 16)
+    except:
+        font = ImageFont.load_default()
+        
+    draw.text((15, 15), texto, fill=(30, 41, 59), font=font)
+    nova_img.save(caminho_imagem)
+
 def enviar_email_com_anexos(arquivos_prints, data_hoje):
-    # Se não houver prints gerados, o robô encerra sem mandar e-mail
     if not arquivos_prints:
         print("Nenhuma campanha ativa hoje. E-mail não enviado.")
         return
@@ -78,23 +98,20 @@ def executar():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # Resolução de tela padrão desktop
         page = browser.new_page(viewport={"width": 1920, "height": 1080})
 
         for c in campanhas:
             cliente = obter_valor_chaves(c, "cliente", "Cliente") or "Cliente"
             url = obter_valor_chaves(c, "url", "URL")
-            posicao = obter_valor_chaves(c, "posicao", "Posição", "Posicao", "Espaco", "Espaço") or "1"
+            posicao = str(obter_valor_chaves(c, "posicao", "Posição", "Posicao", "Espaco", "Espaço") or "1").strip().lower()
             status = obter_valor_chaves(c, "status", "Status") or ""
             
             d_inicio = converter_data(obter_valor_chaves(c, "data_inicio", "data inicio", "Data Início"))
             d_fim = converter_data(obter_valor_chaves(c, "data_fim", "data fim", "Data Fim"))
 
-            # Validação: ignora se não estiver "Ativo"
             if str(status).strip().lower() != "ativo":
                 continue
 
-            # Validação: ignora se estiver fora da data de vigência
             if d_inicio and d_fim and not (d_inicio <= hoje <= d_fim):
                 continue
 
@@ -104,23 +121,43 @@ def executar():
             print(f"Processando: {cliente} (Espaço {posicao})")
 
             try:
-                page.goto(url, timeout=60000, wait_until="domcontentloaded")
-                page.wait_for_timeout(3000)
+                # Tenta localizar o banner do cliente em caso de rotação de anúncios (até 5 tentativas)
+                encontrou = False
+                for tentativa in range(5):
+                    page.goto(url, timeout=60000, wait_until="domcontentloaded")
+                    page.wait_for_timeout(2000)
 
-                # Ajuste automático de scroll conforme a numeração do Espaço (1 a 7)
-                posicao_str = str(posicao).strip()
-                if posicao_str in ["3", "4"]:
-                    page.evaluate("window.scrollBy(0, 450);")
-                    page.wait_for_timeout(1000)
-                elif posicao_str in ["5", "6", "7"]:
-                    page.evaluate("window.scrollBy(0, 1100);")
-                    page.wait_for_timeout(1000)
+                    # Ajuste do Scroll de acordo com o Espaço (1 a 7)
+                    if "1" in posicao or "topo" in posicao:
+                        page.evaluate("window.scrollTo(0, 0);")
+                    elif "2" in posicao or "principal" in posicao:
+                        page.evaluate("window.scrollTo(0, 300);")
+                    elif "3" in posicao or "meio" in posicao:
+                        page.evaluate("window.scrollTo(0, 800);")
+                    elif "4" in posicao or "lateral" in posicao or "noticias" in posicao:
+                        page.evaluate("window.scrollTo(0, 600);")
+                    elif "5" in posicao or "rodape" in posicao:
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                    elif "6" in posicao or "7" in posicao or "materia" in posicao:
+                        page.evaluate("window.scrollTo(0, 1100);")
 
-                nome_arquivo = f"{cliente}_Espaco_{posicao_str}_{hoje}.png".replace(" ", "_").replace("/", "-")
+                    page.wait_for_timeout(1500)
+
+                    # Se encontrar o nome/termo do cliente na tela ou na imagem
+                    conteudo = page.content().lower()
+                    if cliente.lower() in conteudo or tentativa == 4:
+                        encontrou = True
+                        break
+
+                nome_arquivo = f"{cliente}_Espaco_{posicao}_{hoje}.png".replace(" ", "_").replace("/", "-")
                 caminho_local = os.path.join("prints", nome_arquivo)
 
-                # full_page=False para capturar a área enquadrada do viewport
                 page.screenshot(path=caminho_local, full_page=False)
+
+                # Adiciona o carimbo com URL, Data e Hora no topo da imagem
+                data_hora_agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                adicionar_carimbo_url_data(caminho_local, url, data_hora_agora, cliente, posicao)
+
                 prints_gerados.append(caminho_local)
 
             except Exception as e:
@@ -128,7 +165,6 @@ def executar():
 
         browser.close()
 
-    # Dispara apenas 1 e-mail com os anexos do dia
     enviar_email_com_anexos(prints_gerados, hoje)
 
 if __name__ == "__main__":
