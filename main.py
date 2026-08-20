@@ -40,6 +40,7 @@ def executar():
     try:
         res = requests.get(WEBAPP_URL)
         campanhas = res.json()
+        print(f"Total de registros recebidos do Apps Script: {len(campanhas)}")
     except Exception as e:
         print(f"Erro ao buscar dados do Apps Script: {e}")
         return
@@ -58,19 +59,22 @@ def executar():
             d_inicio = converter_data(c.get("data_inicio"))
             d_fim = converter_data(c.get("data_fim"))
 
-            if status != "Ativo":
+            print(f"\n--- Analisando: {cliente} ---")
+            print(f"Status na planilha: '{status}' | Inicio: {d_inicio} | Fim: {d_fim} | Hoje: {hoje}")
+
+            if str(status).strip().lower() != "ativo":
+                print(f"-> Ignorado: Status não é 'Ativo'")
                 continue
 
             if d_inicio and d_fim:
                 if not (d_inicio <= hoje <= d_fim):
+                    print(f"-> Ignorado: Data fora do período ({d_inicio} até {d_fim})")
                     continue
 
-            print(f"Capturando print de: {cliente} | {url}")
+            print(f"-> EXECUTANDO CAPTURA: {cliente} | {url}")
 
             try:
-                # Aguarda até 60s (60000ms) carregando a estrutura da página
                 page.goto(url, timeout=60000, wait_until="domcontentloaded")
-                # Aguarda +3s para dar tempo dos scripts e banners renderizarem
                 page.wait_for_timeout(3000)
 
                 nome_arquivo = f"{cliente}_{posicao}_{hoje}.png".replace(" ", "_").replace("/", "-")
@@ -82,7 +86,7 @@ def executar():
                 enviar_para_google_drive(caminho_local, nome_arquivo)
 
             except Exception as e:
-                print(f"Erro/Timeout ao capturar print de {cliente}: {e}")
+                print(f"Erro ao capturar print de {cliente}: {e}")
                 continue
 
         browser.close()
