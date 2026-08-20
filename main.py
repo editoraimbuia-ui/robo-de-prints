@@ -6,7 +6,6 @@ from email.message import EmailMessage
 from playwright.sync_api import sync_playwright
 from PIL import Image, ImageDraw, ImageFont
 
-# --- CONFIGURAÇÕES DE E-MAIL ---
 EMAIL_REMETENTE = "editoraimbuia@gmail.com"
 EMAIL_DESTINATARIO = "gazetadoparana01@hotmail.com"
 SENHA_APP = "ofxi lkzn ymno mojw"
@@ -33,7 +32,6 @@ def obter_valor_chaves(dicionario, *chaves):
     return None
 
 def adicionar_carimbo_url_data(caminho_imagem, url, data_hora_str, cliente, espaco):
-    """ Adiciona um carimbo profissional no topo do print com URL, Data e Hora """
     img = Image.open(caminho_imagem)
     largura, altura = img.size
     
@@ -77,7 +75,7 @@ def enviar_email_com_anexos(arquivos_prints, data_hoje):
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
             smtp.login(EMAIL_REMETENTE, senha_limpa)
             smtp.send_message(msg)
-        print(f"Sucesso! 1 e-mail unificado enviado contendo {len(arquivos_prints)} print(s).")
+        print(f"Sucesso! E-mail enviado com {len(arquivos_prints)} print(s).")
     except Exception as e:
         print(f"Erro ao enviar e-mail: {e}")
 
@@ -88,9 +86,8 @@ def executar():
     try:
         res = requests.get(WEBAPP_URL, allow_redirects=True)
         campanhas = res.json()
-        print(f"Total de registros na planilha: {len(campanhas)}")
     except Exception as e:
-        print(f"Erro ao buscar planilha: {e}")
+        print(f"Erro ao buscar gerenciador: {e}")
         return
 
     os.makedirs("prints", exist_ok=True)
@@ -121,40 +118,30 @@ def executar():
             print(f"Processando: {cliente} (Espaço {posicao})")
 
             try:
-                # Tenta localizar o banner do cliente em caso de rotação de anúncios (até 5 tentativas)
-                encontrou = False
-                for tentativa in range(5):
-                    page.goto(url, timeout=60000, wait_until="domcontentloaded")
-                    page.wait_for_timeout(2000)
+                page.goto(url, timeout=60000, wait_until="domcontentloaded")
+                page.wait_for_timeout(2000)
 
-                    # Ajuste do Scroll de acordo com o Espaço (1 a 7)
-                    if "1" in posicao or "topo" in posicao:
-                        page.evaluate("window.scrollTo(0, 0);")
-                    elif "2" in posicao or "principal" in posicao:
-                        page.evaluate("window.scrollTo(0, 300);")
-                    elif "3" in posicao or "meio" in posicao:
-                        page.evaluate("window.scrollTo(0, 800);")
-                    elif "4" in posicao or "lateral" in posicao or "noticias" in posicao:
-                        page.evaluate("window.scrollTo(0, 600);")
-                    elif "5" in posicao or "rodape" in posicao:
-                        page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    elif "6" in posicao or "7" in posicao or "materia" in posicao:
-                        page.evaluate("window.scrollTo(0, 1100);")
+                # Scroll exato para cada espaço
+                if "1" in posicao or "topo" in posicao:
+                    page.evaluate("window.scrollTo(0, 0);")
+                elif "2" in posicao or "principal" in posicao:
+                    page.evaluate("window.scrollTo(0, 300);")
+                elif "3" in posicao or "meio" in posicao:
+                    page.evaluate("window.scrollTo(0, 800);")
+                elif "4" in posicao or "lateral" in posicao:
+                    page.evaluate("window.scrollTo(0, 500);")
+                elif "5" in posicao or "rodape" in posicao:
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                elif "6" in posicao or "7" in posicao or "materia" in posicao:
+                    page.evaluate("window.scrollTo(0, 1100);")
 
-                    page.wait_for_timeout(1500)
-
-                    # Se encontrar o nome/termo do cliente na tela ou na imagem
-                    conteudo = page.content().lower()
-                    if cliente.lower() in conteudo or tentativa == 4:
-                        encontrou = True
-                        break
+                page.wait_for_timeout(2000)
 
                 nome_arquivo = f"{cliente}_Espaco_{posicao}_{hoje}.png".replace(" ", "_").replace("/", "-")
                 caminho_local = os.path.join("prints", nome_arquivo)
 
                 page.screenshot(path=caminho_local, full_page=False)
 
-                # Adiciona o carimbo com URL, Data e Hora no topo da imagem
                 data_hora_agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
                 adicionar_carimbo_url_data(caminho_local, url, data_hora_agora, cliente, posicao)
 
