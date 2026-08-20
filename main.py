@@ -28,17 +28,27 @@ def enviar_para_google_drive(caminho_arquivo, nome_arquivo):
             "base64": encoded_string
         }
 
-        res = requests.post(WEBAPP_URL, json=payload)
-        print(f"Envio ao Drive ({nome_arquivo}): {res.text}")
+        # allow_redirects=True garante que a requisição siga os redirecionamentos do Google
+        res = requests.post(WEBAPP_URL, json=payload, allow_redirects=True)
+        print(f"Resposta do Google Drive ({nome_arquivo}): {res.text}")
     except Exception as e:
         print(f"Erro ao enviar {nome_arquivo} para o Drive: {e}")
+
+def obter_valor_chaves(dicionario, *chaves):
+    """Busca o valor no dicionário ignorando maiúsculas e minúsculas"""
+    dicionario_normalizado = {str(k).strip().lower(): v for k, v in dicionario.items()}
+    for chave in chaves:
+        chave_normalizada = chave.strip().lower()
+        if chave_normalizada in dicionario_normalizado:
+            return dicionario_normalizado[chave_normalizada]
+    return None
 
 def executar():
     hoje = datetime.now().date()
     print(f"--- Início do Processamento: {hoje} ---")
 
     try:
-        res = requests.get(WEBAPP_URL)
+        res = requests.get(WEBAPP_URL, allow_redirects=True)
         campanhas = res.json()
         print(f"Total de registros recebidos do Apps Script: {len(campanhas)}")
     except Exception as e:
@@ -52,15 +62,16 @@ def executar():
         page = browser.new_page(viewport={"width": 1920, "height": 1080})
 
         for c in campanhas:
-            cliente = c.get("cliente")
-            url = c.get("url")
-            posicao = c.get("posicao")
-            status = c.get("status")
-            d_inicio = converter_data(c.get("data_inicio"))
-            d_fim = converter_data(c.get("data_fim"))
+            cliente = obter_valor_chaves(c, "cliente", "Cliente") or "Cliente_Desconhecido"
+            url = obter_valor_chaves(c, "url", "Url", "URL")
+            posicao = obter_valor_chaves(c, "posicao", "Posição", "Posicao") or "Posicao"
+            status = obter_valor_chaves(c, "status", "Status") or ""
+            
+            d_inicio = converter_data(obter_valor_chaves(c, "data_inicio", "data inicio", "Data Início"))
+            d_fim = converter_data(obter_valor_chaves(c, "data_fim", "data fim", "Data Fim"))
 
             print(f"\n--- Analisando: {cliente} ---")
-            print(f"Status na planilha: '{status}' | Inicio: {d_inicio} | Fim: {d_fim} | Hoje: {hoje}")
+            print(f"Status: '{status}' | Inicio: {d_inicio} | Fim: {d_fim} | Hoje: {hoje}")
 
             if str(status).strip().lower() != "ativo":
                 print(f"-> Ignorado: Status não é 'Ativo'")
@@ -70,6 +81,10 @@ def executar():
                 if not (d_inicio <= hoje <= d_fim):
                     print(f"-> Ignorado: Data fora do período ({d_inicio} até {d_fim})")
                     continue
+
+            if not url:
+                print(f"-> Ignorado: URL vazia")
+                continue
 
             print(f"-> EXECUTANDO CAPTURA: {cliente} | {url}")
 
