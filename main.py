@@ -68,7 +68,9 @@ def executar():
             print(f"Capturando print de: {cliente} | {url}")
 
             try:
-              page.goto(url, timeout=15000, wait_until="load")
+                # Aguarda até 60s (60000ms) carregando a estrutura da página
+                page.goto(url, timeout=60000, wait_until="domcontentloaded")
+                # Aguarda +3s para dar tempo dos scripts e banners renderizarem
                 page.wait_for_timeout(3000)
 
                 nome_arquivo = f"{cliente}_{posicao}_{hoje}.png".replace(" ", "_").replace("/", "-")
@@ -80,7 +82,8 @@ def executar():
                 enviar_para_google_drive(caminho_local, nome_arquivo)
 
             except Exception as e:
-                print(f"Erro ao capturar print de {cliente}: {e}")
+                print(f"Erro/Timeout ao capturar print de {cliente}: {e}")
+                continue
 
         browser.close()
 
