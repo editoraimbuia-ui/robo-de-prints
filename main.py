@@ -1,163 +1,186 @@
+"""
+Monitor de Prints - Gazeta do Paraná
+Roda no GitHub Actions (Linux + Playwright)
+Busca banner pelo atributo alt, fotografa o elemento, envia por email.
+"""
+
+import json
 import os
-import requests
 import smtplib
-from datetime import datetime
-from email.message import EmailMessage
-from playwright.sync_api import sync_playwright
+from datetime import date, datetime
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont
+from playwright.sync_api import sync_playwright
 
 EMAIL_REMETENTE = "editoraimbuia@gmail.com"
-EMAIL_DESTINATARIO = "gazetadoparana01@hotmail.com"
-SENHA_APP = "ofxi lkzn ymno mojw"
+EMAIL_DESTINO   = "gazetadoparana01@hotmail.com"
+GMAIL_SENHA     = os.environ.get("GMAIL_SENHA", "")
 
-WEBAPP_URL = "https://script.google.com/macros/s/AKfycbziOURSlbOgz2vISG8u7FfWMRwe_X4YCICY_e3YQjGF3D_t7AJ7zsWfxSeANOr3NL0N4w/exec"
+CAMPANHAS_JSON = Path(__file__).parent / "campanhas.json"
+URL_SITE = "https://www.gazetadoparana.com.br"
 
-def converter_data(data_str):
+
+def carregar_campanhas():
+    if not CAMPANHAS_JSON.exists():
+        print("[ERRO] campanhas.json não encontrado")
+        return []
+    with open(CAMPANHAS_JSON, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def campanha_ativa_hoje(c):
+    if not c.get("ativo", True):
+        return False
+    hoje = date.today()
     try:
-        if isinstance(data_str, str):
-            return datetime.strptime(data_str.split("T")[0], "%Y-%m-%d").date()
-    except:
+        inicio = date.fromisoformat(c["inicio"])
+        fim    = date.fromisoformat(c["fim"])
+    except Exception:
+        return False
+    return inicio <= hoje <= fim
+
+
+def adicionar_carimbo(img_bytes, campanha, posicao):
+    from io import BytesIO
+    img = Image.open(BytesIO(img_bytes)).convert("RGB")
+    rodape_h = 36
+    nova = Image.new("RGB", (img.width, img.height + rodape_h), (30, 30, 30))
+    nova.paste(img, (0, 0))
+    draw = ImageDraw.Draw(nova)
+    try:
+        fonte = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+    except Exception:
+        fonte = ImageFont.load_default()
+    agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    texto = f"{URL_SITE}  |  {agora}  |  {campanha}  |  {posicao}"
+    draw.text((8, img.height + 8), texto, fill=(220, 220, 220), font=fonte)
+    buf = BytesIO()
+    nova.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def tirar_print_banner(page, alt_texto, nome_arquivo):
+    if not alt_texto or alt_texto.strip() == "":
+        print(f"  [AVISO] alt vazio, pulando {nome_arquivo}")
+        return None
+    seletores = [
+        f'img[alt="{alt_texto}"]',
+        f'img[alt*="{alt_texto}"]',
+        f'[alt="{alt_texto}"]',
+    ]
+    for sel in seletores:
         try:
-            return datetime.strptime(str(data_str).strip(), "%d/%m/%Y").date()
-        except:
-            return None
-    return None
+            elem = page.locator(sel).first
+            if elem.count() == 0:
+                continue
+            elem.scroll_into_view_if_needed(timeout=5000)
+            page.wait_for_timeout(800)
+            dados = elem.screenshot()
+            if dados and len(dados) > 1000:
+                print(f"  [OK] Banner encontrado: {sel}")
+                return dados
+            pai = page.locator(sel).first.locator("xpath=..")
+            dados = pai.screenshot()
+            if dados and len(dados) > 1000:
+                print(f"  [OK] Banner (pai) encontrado: {sel}")
+                return dados
+        except Exception as e:
+            print(f"  [tentativa] {sel}: {e}")
+            continue
+    print(f"  [AVISO] Banner nao encontrado. Print completo da pagina.")
+    return page.screenshot(full_page=False)
 
-def obter_valor_chaves(dicionario, *chaves):
-    dicionario_normalizado = {str(k).strip().lower(): v for k, v in dicionario.items()}
-    for chave in chaves:
-        chave_normalizada = chave.strip().lower()
-        if chave_normalizada in dicionario_normalizado:
-            return dicionario_normalizado[chave_normalizada]
-    return None
 
-def adicionar_carimbo_url_data(caminho_imagem, url, data_hora_str, cliente, espaco):
-    img = Image.open(caminho_imagem)
-    largura, altura = img.size
-    
-    altura_carimbo = 50
-    nova_img = Image.new("RGB", (largura, altura + altura_carimbo), (240, 242, 245))
-    nova_img.paste(img, (0, altura_carimbo))
-    
-    draw = ImageDraw.Draw(nova_img)
-    texto = f"  URL: {url}   |   DATA/HORA: {data_hora_str}   |   CLIENTE: {cliente} (Espaço {espaco})"
-    
+def enviar_email(assunto, corpo, anexos):
+    if not GMAIL_SENHA:
+        print("[ERRO] GMAIL_SENHA nao definida nos Secrets do GitHub.")
+        return False
+    msg = MIMEMultipart()
+    msg["From"]    = EMAIL_REMETENTE
+    msg["To"]      = EMAIL_DESTINO
+    msg["Subject"] = assunto
+    msg.attach(MIMEText(corpo, "plain", "utf-8"))
+    for nome_arquivo, dados in anexos:
+        img_part = MIMEImage(dados, name=nome_arquivo)
+        img_part.add_header("Content-Disposition", "attachment", filename=nome_arquivo)
+        msg.attach(img_part)
     try:
-        font = ImageFont.truetype("arial.ttf", 16)
-    except:
-        font = ImageFont.load_default()
-        
-    draw.text((15, 15), texto, fill=(30, 41, 59), font=font)
-    nova_img.save(caminho_imagem)
-
-def enviar_email_com_anexos(arquivos_prints, data_hoje):
-    if not arquivos_prints:
-        print("Nenhuma campanha ativa hoje. E-mail não enviado.")
-        return
-
-    msg = EmailMessage()
-    msg['Subject'] = f"Comprovantes de Prints - {data_hoje.strftime('%d/%m/%Y')}"
-    msg['From'] = EMAIL_REMETENTE
-    msg['To'] = EMAIL_DESTINATARIO
-    msg.set_content(
-        f"Olá!\n\nSegue em anexo o relatório diário das 08:00 AM contendo as capturas de tela "
-        f"dos {len(arquivos_prints)} banners ativos em {data_hoje.strftime('%d/%m/%Y')}."
-    )
-
-    for caminho_arquivo in arquivos_prints:
-        nome_arquivo = os.path.basename(caminho_arquivo)
-        with open(caminho_arquivo, 'rb') as f:
-            dados_arquivo = f.read()
-            msg.add_attachment(dados_arquivo, maintype='image', subtype='png', filename=nome_arquivo)
-
-    try:
-        senha_limpa = SENHA_APP.replace(" ", "")
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-            smtp.login(EMAIL_REMETENTE, senha_limpa)
-            smtp.send_message(msg)
-        print(f"Sucesso! E-mail enviado com {len(arquivos_prints)} print(s).")
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(EMAIL_REMETENTE, GMAIL_SENHA)
+            smtp.sendmail(EMAIL_REMETENTE, EMAIL_DESTINO, msg.as_bytes())
+        print(f"  [OK] Email enviado para {EMAIL_DESTINO}")
+        return True
     except Exception as e:
-        print(f"Erro ao enviar e-mail: {e}")
+        print(f"  [ERRO] Falha ao enviar email: {e}")
+        return False
 
-def executar():
-    hoje = datetime.now().date()
-    print(f"--- Início do Processamento: {hoje} ---")
 
-    try:
-        res = requests.get(WEBAPP_URL, allow_redirects=True)
-        campanhas = res.json()
-    except Exception as e:
-        print(f"Erro ao buscar gerenciador: {e}")
+def main():
+    campanhas = carregar_campanhas()
+    hoje = date.today()
+    agora_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ativas = [c for c in campanhas if campanha_ativa_hoje(c)]
+    print(f"[{agora_str}] {len(ativas)} campanha(s) ativa(s) hoje ({hoje})")
+    if not ativas:
+        print("Nenhuma campanha para processar. Encerrando.")
         return
-
-    os.makedirs("prints", exist_ok=True)
-    prints_gerados = []
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1920, "height": 1080})
-
-        for c in campanhas:
-            cliente = obter_valor_chaves(c, "cliente", "Cliente") or "Cliente"
-            url = obter_valor_chaves(c, "url", "URL")
-            posicao = str(obter_valor_chaves(c, "posicao", "Posição", "Posicao", "Espaco", "Espaço") or "1").strip().lower()
-            status = obter_valor_chaves(c, "status", "Status") or ""
-            
-            d_inicio = converter_data(obter_valor_chaves(c, "data_inicio", "data inicio", "Data Início"))
-            d_fim = converter_data(obter_valor_chaves(c, "data_fim", "data fim", "Data Fim"))
-
-            # Filtra apenas campanhas ativas dentro da data de hoje
-            if str(status).strip().lower() != "ativo":
-                continue
-
-            if d_inicio and d_fim and not (d_inicio <= hoje <= d_fim):
-                continue
-
-            if not url:
-                continue
-
-            print(f"Capturando: {cliente} (Espaço {posicao})")
-
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu","--window-size=1920,1080"],
+        )
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
+        for c in ativas:
+            nome = c.get("nome", f"campanha_{c.get('id',0)}")
+            print(f"\n-- Processando: {nome} --")
+            page = context.new_page()
             try:
-                page.goto(url, timeout=60000, wait_until="domcontentloaded")
-                page.wait_for_timeout(2500)
-
-                # Mapeamento exato de rolagem da tela
-                if "1" in posicao or "topo" in posicao:
-                    page.evaluate("window.scrollTo(0, 0);")
-                elif "2" in posicao or "principal" in posicao:
-                    page.evaluate("window.scrollTo(0, 300);")
-                elif "3" in posicao or "meio" in posicao:
-                    page.evaluate("window.scrollTo(0, 800);")
-                elif "4" in posicao or "noticias" in posicao or "últimas" in posicao:
-                    # Rola exatamente até a seção de Últimas Notícias (Espaço 4)
-                    page.evaluate("window.scrollTo(0, 1300);")
-                elif "5" in posicao or "rodape" in posicao:
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                elif "6" in posicao or "materia a" in posicao:
-                    page.evaluate("window.scrollTo(0, 1100);")
-                elif "7" in posicao or "materia b" in posicao:
-                    page.evaluate("window.scrollTo(0, 1600);")
-
-                page.wait_for_timeout(2000)
-
-                nome_arquivo = f"{cliente}_Espaco_{posicao}_{hoje}.png".replace(" ", "_").replace("/", "-")
-                caminho_local = os.path.join("prints", nome_arquivo)
-
-                page.screenshot(path=caminho_local, full_page=False)
-
-                # Adiciona o carimbo visual com a URL e Data/Hora
-                data_hora_agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                adicionar_carimbo_url_data(caminho_local, url, data_hora_agora, cliente, posicao)
-
-                prints_gerados.append(caminho_local)
-
+                page.goto(URL_SITE, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(3000)
             except Exception as e:
-                print(f"Erro ao capturar {cliente}: {e}")
-
+                print(f"  [ERRO] Nao foi possivel abrir o site: {e}")
+                page.close()
+                continue
+            anexos = []
+            data_str = hoje.strftime("%Y%m%d")
+            if c.get("topo", False) and c.get("banner_topo", "").strip():
+                alt = c["banner_topo"]
+                fname = f"topo_{nome}_{data_str}.png"
+                print(f"  Topo -> alt: '{alt}'")
+                dados = tirar_print_banner(page, alt, fname)
+                if dados:
+                    dados = adicionar_carimbo(dados, nome, "Topo")
+                    anexos.append((fname, dados))
+            if c.get("meio", False) and c.get("banner_meio", "").strip():
+                alt = c["banner_meio"]
+                fname = f"meio_{nome}_{data_str}.png"
+                print(f"  Meio -> alt: '{alt}'")
+                dados = tirar_print_banner(page, alt, fname)
+                if dados:
+                    dados = adicionar_carimbo(dados, nome, "Meio")
+                    anexos.append((fname, dados))
+            page.close()
+            if not anexos:
+                print(f"  [AVISO] Nenhum print gerado para '{nome}' - verifique o campo alt.")
+                continue
+            assunto = f"Comprovante de veiculacao - {nome} - {hoje.strftime('%d/%m/%Y')}"
+            corpo = (
+                f"Ola,\n\nSeguem os prints de comprovacao de veiculacao da campanha '{nome}' "
+                f"no site gazetadoparana.com.br, capturados em {agora_str}.\n\n"
+                f"Periodo da campanha: {c.get('inicio')} a {c.get('fim')}\n\n"
+                f"Atenciosamente,\nEditora Imbuia"
+            )
+            enviar_email(assunto, corpo, anexos)
         browser.close()
+    print("\n[FIM] Processamento concluido.")
 
-    enviar_email_com_anexos(prints_gerados, hoje)
 
 if __name__ == "__main__":
-    executar()
+    main()
