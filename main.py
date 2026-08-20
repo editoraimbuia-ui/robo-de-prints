@@ -1,9 +1,18 @@
 import os
 import requests
-import base64
+import smtplib
 from datetime import datetime
+from email.message import EmailMessage
 from playwright.sync_api import sync_playwright
 
+# --- CONFIGURAÇÕES DE E-MAIL ---
+EMAIL_REMETENTE = "gazetadoparana01@hotmail.com"
+EMAIL_DESTINATARIO = "gazetadoparana01@hotmail.com"
+
+# Senha de app gerada na conta Google
+SENHA_APP_GMAIL = "ofxi lkzn ymno mojw"
+
+# URL para ler os dados da planilha
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycbziOURSlbOgz2vISG8u7FfWMRwe_X4YCICY_e3YQjGF3D_t7AJ7zsWfxSeANOr3NL0N4w/exec"
 
 def converter_data(data_str):
@@ -17,31 +26,39 @@ def converter_data(data_str):
             return None
     return None
 
-def enviar_para_google_drive(caminho_arquivo, nome_arquivo):
-    try:
-        with open(caminho_arquivo, "rb") as f:
-            encoded_string = base64.b64encode(f.read()).decode("utf-8")
-
-        payload = {
-            "fileName": nome_arquivo,
-            "mimeType": "image/png",
-            "base64": encoded_string
-        }
-
-        # allow_redirects=True garante que a requisição siga os redirecionamentos do Google
-        res = requests.post(WEBAPP_URL, json=payload, allow_redirects=True)
-        print(f"Resposta do Google Drive ({nome_arquivo}): {res.text}")
-    except Exception as e:
-        print(f"Erro ao enviar {nome_arquivo} para o Drive: {e}")
-
 def obter_valor_chaves(dicionario, *chaves):
-    """Busca o valor no dicionário ignorando maiúsculas e minúsculas"""
     dicionario_normalizado = {str(k).strip().lower(): v for k, v in dicionario.items()}
     for chave in chaves:
         chave_normalizada = chave.strip().lower()
         if chave_normalizada in dicionario_normalizado:
             return dicionario_normalizado[chave_normalizada]
     return None
+
+def enviar_email_com_anexos(arquivos_prints, data_hoje):
+    if not arquivos_prints:
+        print("Nenhum print foi gerado para enviar por e-mail.")
+        return
+
+    msg = EmailMessage()
+    msg['Subject'] = f"Comprovantes de Prints - {data_hoje.strftime('%d/%m/%Y')}"
+    msg['From'] = EMAIL_REMETENTE
+    msg['To'] = EMAIL_DESTINATARIO
+    msg.set_content(f"Olá!\n\nSegue em anexo a captura de tela dos {len(arquivos_prints)} banners ativos em {data_hoje.strftime('%d/%m/%Y')}.")
+
+    for caminho_arquivo in arquivos_prints:
+        nome_arquivo = os.path.basename(caminho_arquivo)
+        with open(caminho_arquivo, 'rb') as f:
+            dados_arquivo = f.read()
+            msg.add_attachment(dados_arquivo, maintype='image', subtype='png', filename=nome_arquivo)
+
+    try:
+        senha_limpa = SENHA_APP_GMAIL.replace(" ", "")
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(EMAIL_REMETENTE, senha_limpa)
+            smtp.send_message(msg)
+        print(f"Sucesso! E-mail enviado com {len(arquivos_prints)} print(s) anexado(s).")
+    except Exception as e:
+        print(f"Erro ao enviar e-mail: {e}")
 
 def executar():
     hoje = datetime.now().date()
@@ -50,43 +67,37 @@ def executar():
     try:
         res = requests.get(WEBAPP_URL, allow_redirects=True)
         campanhas = res.json()
-        print(f"Total de registros recebidos do Apps Script: {len(campanhas)}")
+        print(f"Total de registros na planilha: {len(campanhas)}")
     except Exception as e:
-        print(f"Erro ao buscar dados do Apps Script: {e}")
+        print(f"Erro ao buscar planilha: {e}")
         return
 
     os.makedirs("prints", exist_ok=True)
+    prints_gerados = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1920, "height": 1080})
 
         for c in campanhas:
-            cliente = obter_valor_chaves(c, "cliente", "Cliente") or "Cliente_Desconhecido"
-            url = obter_valor_chaves(c, "url", "Url", "URL")
+            cliente = obter_valor_chaves(c, "cliente", "Cliente") or "Cliente"
+            url = obter_valor_chaves(c, "url", "URL")
             posicao = obter_valor_chaves(c, "posicao", "Posição", "Posicao") or "Posicao"
             status = obter_valor_chaves(c, "status", "Status") or ""
             
             d_inicio = converter_data(obter_valor_chaves(c, "data_inicio", "data inicio", "Data Início"))
             d_fim = converter_data(obter_valor_chaves(c, "data_fim", "data fim", "Data Fim"))
 
-            print(f"\n--- Analisando: {cliente} ---")
-            print(f"Status: '{status}' | Inicio: {d_inicio} | Fim: {d_fim} | Hoje: {hoje}")
-
             if str(status).strip().lower() != "ativo":
-                print(f"-> Ignorado: Status não é 'Ativo'")
                 continue
 
-            if d_inicio and d_fim:
-                if not (d_inicio <= hoje <= d_fim):
-                    print(f"-> Ignorado: Data fora do período ({d_inicio} até {d_fim})")
-                    continue
+            if d_inicio and d_fim and not (d_inicio <= hoje <= d_fim):
+                continue
 
             if not url:
-                print(f"-> Ignorado: URL vazia")
                 continue
 
-            print(f"-> EXECUTANDO CAPTURA: {cliente} | {url}")
+            print(f"Capturando: {cliente} - {posicao}")
 
             try:
                 page.goto(url, timeout=60000, wait_until="domcontentloaded")
@@ -96,15 +107,14 @@ def executar():
                 caminho_local = os.path.join("prints", nome_arquivo)
 
                 page.screenshot(path=caminho_local, full_page=True)
-                print(f"Print gerado localmente: {nome_arquivo}")
-
-                enviar_para_google_drive(caminho_local, nome_arquivo)
+                prints_gerados.append(caminho_local)
 
             except Exception as e:
-                print(f"Erro ao capturar print de {cliente}: {e}")
-                continue
+                print(f"Erro ao capturar {cliente}: {e}")
 
         browser.close()
+
+    enviar_email_com_anexos(prints_gerados, hoje)
 
 if __name__ == "__main__":
     executar()
