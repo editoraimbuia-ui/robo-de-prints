@@ -6,11 +6,11 @@ from email.message import EmailMessage
 from playwright.sync_api import sync_playwright
 
 # --- CONFIGURAÇÕES DE E-MAIL ---
-EMAIL_REMETENTE = "editoraimbuia@gmail.com"
-EMAIL_DESTINATARIO = "gazetadoparana01@hotmail.com"
+EMAIL_REMETENTE = "editoraimbuia@gmail.com"           # O Gmail oficial que envia
+EMAIL_DESTINATARIO = "gazetadoparana01@hotmail.com"   # O e-mail que recebe os prints
 
-# Senha de app gerada na conta Google
-SENHA_APP_GMAIL = "ofxi lkzn ymno mojw"
+# Senha de app de 16 caracteres gerada na conta editoraimbuia@gmail.com
+SENHA_APP = "ofxi lkzn ymno mojw"
 
 # URL para ler os dados da planilha
 WEBAPP_URL = "https://script.google.com/macros/s/AKfycbziOURSlbOgz2vISG8u7FfWMRwe_X4YCICY_e3YQjGF3D_t7AJ7zsWfxSeANOr3NL0N4w/exec"
@@ -52,7 +52,7 @@ def enviar_email_com_anexos(arquivos_prints, data_hoje):
             msg.add_attachment(dados_arquivo, maintype='image', subtype='png', filename=nome_arquivo)
 
     try:
-        senha_limpa = SENHA_APP_GMAIL.replace(" ", "")
+        senha_limpa = SENHA_APP.replace(" ", "")
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
             smtp.login(EMAIL_REMETENTE, senha_limpa)
             smtp.send_message(msg)
